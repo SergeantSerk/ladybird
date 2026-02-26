@@ -55,12 +55,26 @@ jobs:
         shell: pwsh
         run: |
           $vcpkgBin = "${{ github.workspace }}/Build/vcpkg/installed/x64-windows/bin"
+          $buildBin = "${{ github.workspace }}/Build/release/bin"
           $installBin = "${{ github.workspace }}/Install/bin"
+          
+          # Ensure install bin exists
+          if (!(Test-Path $installBin)) { New-Item -ItemType Directory -Path $installBin -Force }
+          
+          # Copy DLLs from vcpkg (includes pthreads, etc.)
           if (Test-Path $vcpkgBin) {
             Write-Host "Copying DLLs from $vcpkgBin to $installBin"
             Copy-Item -Path "$vcpkgBin\*.dll" -Destination $installBin -Force
           } else {
             Write-Warning "Vcpkg bin directory not found at $vcpkgBin"
+          }
+          
+          # Copy everything from build directory bin (includes Qt deployment results like plugins)
+          if (Test-Path $buildBin) {
+            Write-Host "Copying deployed dependencies and plugins from $buildBin to $installBin"
+            Copy-Item -Path "$buildBin\*" -Destination $installBin -Recurse -Force
+          } else {
+            Write-Warning "Build bin directory not found at $buildBin"
           }
 
       - name: Save Caches
@@ -73,14 +87,9 @@ jobs:
           vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
           vcpkg_cache_primary_key: ${{ steps.cache-restore.outputs.vcpkg_cache_primary_key }}
 
-      - name: Create Portable Zip
-        shell: pwsh
-        run: |
-          Compress-Archive -Path ${{ github.workspace }}/Install/* -DestinationPath ${{ github.workspace }}/Ladybird-Windows-Portable.zip
-
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
         with:
           name: ladybird-windows-portable
-          path: ${{ github.workspace }}/Ladybird-Windows-Portable.zip
+          path: ${{ github.workspace }}/Install/
           retention-days: 7
