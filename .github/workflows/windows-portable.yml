@@ -1,0 +1,86 @@
+name: Windows Portable Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+env:
+  LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  VCPKG_ROOT: ${{ github.workspace }}/Build/vcpkg
+
+jobs:
+  build:
+    runs-on: windows-2025
+    
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set Up Environment
+        uses: ./.github/actions/setup
+        id: 'setup'
+        with:
+          os: 'Windows'
+          arch: 'x86_64'
+          toolchain: 'ClangCL'
+
+      - name: Restore Caches
+        uses: ./.github/actions/cache-restore
+        id: 'cache-restore'
+        with:
+          runner_labels: '["windows-2025"]'
+          os: 'Windows'
+          arch: 'x86_64'
+          toolchain: 'ClangCL'
+          cache_key_extra: 'Release'
+          ccache_path: ${{ env.CCACHE_DIR }}
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+
+      - name: Create Build Environment
+        working-directory: ${{ github.workspace }}
+        run: |
+          cmake --preset Release -B Build `
+            -DENABLE_CI_BASELINE_CPU=ON
+
+      - name: Build
+        working-directory: ${{ github.workspace }}/Build
+        run: |
+          cmake --build . --config Release
+          cmake --install . --config Release --prefix ${{ github.workspace }}/Install
+
+      - name: Collect Dependencies
+        shell: pwsh
+        run: |
+          $vcpkgBin = "${{ github.workspace }}/Build/vcpkg/installed/x64-windows/bin"
+          $installBin = "${{ github.workspace }}/Install/bin"
+          if (Test-Path $vcpkgBin) {
+            Write-Host "Copying DLLs from $vcpkgBin to $installBin"
+            Copy-Item -Path "$vcpkgBin\*.dll" -Destination $installBin -Force
+          } else {
+            Write-Warning "Vcpkg bin directory not found at $vcpkgBin"
+          }
+
+      - name: Save Caches
+        uses: ./.github/actions/cache-save
+        with:
+          runner_labels: '["windows-2025"]'
+          arch: 'x86_64'
+          ccache_path: ${{ env.CCACHE_DIR }}
+          ccache_primary_key: ${{ steps.cache-restore.outputs.ccache_primary_key }}
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+          vcpkg_cache_primary_key: ${{ steps.cache-restore.outputs.vcpkg_cache_primary_key }}
+
+      - name: Create Portable Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ${{ github.workspace }}/Install/* -DestinationPath ${{ github.workspace }}/Ladybird-Windows-Portable.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ladybird-windows-portable
+          path: ${{ github.workspace }}/Ladybird-Windows-Portable.zip
+          retention-days: 7
